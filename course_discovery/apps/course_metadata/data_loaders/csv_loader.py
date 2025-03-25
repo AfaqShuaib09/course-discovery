@@ -110,7 +110,7 @@ class CSVDataLoader(AbstractDataLoader):
         Initialize the CSV reader based on the input source (csv_path, csv_file or gspread_client)
         """
         try:
-            if use_gspread_client and False:
+            if use_gspread_client:
                 product_type_config = settings.PRODUCT_METADATA_MAPPING.get(self.product_type, {}).get(self.product_source.slug, {})
                 gspread_client = GspreadClient()
                 return list(gspread_client.read_data(product_type_config))
@@ -1083,7 +1083,6 @@ class CSVDataLoader(AbstractDataLoader):
         course_run_api_url = reverse('api:v1:course_run-detail', kwargs={'key': course_run.key})
         url = f"{settings.DISCOVERY_BASE_URL}{course_run_api_url}?exclude_utm=1"
         request_data = self._update_course_run_request_data_v2(data, course_run, course_type, is_draft)
-        import pdb; pdb.set_trace();
         response = self._call_course_api('PATCH', url, request_data)
         if response.status_code not in (200, 201):
             logger.info(f"Course run update response: {response.content}")
