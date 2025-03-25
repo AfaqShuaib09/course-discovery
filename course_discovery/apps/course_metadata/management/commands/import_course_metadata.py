@@ -27,7 +27,11 @@ class Command(BaseCommand):
 
     PRODUCT_TYPE_SLUG_MAP = {
         'EXECUTIVE_EDUCATION': CourseType.EXECUTIVE_EDUCATION_2U,
-        'BOOTCAMPS': CourseType.BOOTCAMP_2U
+        'BOOTCAMPS': CourseType.BOOTCAMP_2U,
+        'AUDIT': CourseType.AUDIT,
+        'PROFESSIONAL': CourseType.PROFESSIONAL,
+        'VERIFIED_AUDIT': CourseType.VERIFIED_AUDIT,
+        'MASTERS': 'masters',
     }
 
     def add_arguments(self, parser):
@@ -47,13 +51,19 @@ class Command(BaseCommand):
             help='Product Type to ingest',
             type=str,
             required=True,
-            choices=['EXECUTIVE_EDUCATION', 'BOOTCAMPS']
+            choices=['EXECUTIVE_EDUCATION', 'BOOTCAMPS', 'AUDIT', 'PROFESSIONAL', 'VERIFIED_AUDIT', 'MASTERS'],
         )
         parser.add_argument(
             '--product_source',
             help='Slug of product source with whom the ingested courses are to be linked.',
             type=str,
             required=True
+        )
+        parser.add_argument(
+            '--partial_update',
+            help='Flag to indicate if the import should be a partial update.',
+            type=bool,
+            default=False,
         )
         parser.add_argument(
             '--use_gspread_client',
@@ -101,7 +111,7 @@ class Command(BaseCommand):
                 csv_path=csv_path,
                 csv_file=csv_file,
                 use_gspread_client=use_gspread_client,
-                product_type=self.PRODUCT_TYPE_SLUG_MAP[product_type],
+                product_type=self.PRODUCT_TYPE_SLUG_MAP.get(product_type),
                 product_source=source.slug
             )
             if csv_path:
@@ -125,8 +135,8 @@ class Command(BaseCommand):
         if product_type:
             logger.info(f"Sending Ingestion stats email for product type {product_type}")
             email_subject = f"{source.name} - {product_type.replace('_', ' ').title()} Data Ingestion"
-            product_mapping = settings.PRODUCT_METADATA_MAPPING[self.PRODUCT_TYPE_SLUG_MAP[product_type]][source.slug]
-            to_users = product_mapping['EMAIL_NOTIFICATION_LIST']
+            product_mapping = settings.PRODUCT_METADATA_MAPPING.get(self.PRODUCT_TYPE_SLUG_MAP.get(product_type), {}).get(source.slug, {})
+            to_users = product_mapping.get('EMAIL_NOTIFICATION_LIST', [])
             ingestion_details = {
                 'ingestion_run_time': ingestion_time,
                 **loader.get_ingestion_stats(),
