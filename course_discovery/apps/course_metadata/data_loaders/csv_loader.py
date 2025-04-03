@@ -47,11 +47,13 @@ class CSVDataLoader(AbstractDataLoader):
 
     # list of data fields present as CSV columns that should be present in each row for successful CSV Data ingestion.
     BASE_REQUIRED_DATA_FIELDS = [
-        'title', 'number', 'image', 'short_description', 'long_description', 'what_will_you_learn', 'course_level',
-        'primary_subject', 'verified_price', 'publish_date', 'start_date', 'start_time', 'end_date',
+        'title', 'number', 'image', 'course_level',
+        'primary_subject', 'publish_date', 'start_date', 'start_time', 'end_date',
         'end_time', 'course_pacing', 'minimum_effort', 'maximum_effort', 'length',
         'content_language', 'transcript_language'
     ]
+    
+    # 'short_description', 'long_description', 'what_will_you_learn', 'verified_price'
 
     # Addition of a user agent to allow access to data CDNs
     REQUEST_USER_AGENT_HEADERS = {
@@ -123,6 +125,42 @@ class CSVDataLoader(AbstractDataLoader):
         except Exception as e:
             logger.exception(f"Error reading input data source: {e}")
             raise
+    
+    def populate_missing_required_fields(self):
+        """
+        Populate missing required fields in the data row.
+        """
+        field_mapping = {
+            'title': lambda course: course.title,
+            'image': lambda course: course.image.url if course.image else None,
+            'short_description': lambda course: course.short_description,
+            'long_description': lambda course: course.long_description,
+            'what_will_you_learn': lambda course: course.outcome,
+            'course_level': lambda course: course.level_type.name,
+            'primary_subject': lambda course: course.subjects.first().name if course.subjects.first() else None,
+            'secondary_subject': lambda course: course.subjects.all()[1].name if course.subjects.all()[1] else None,
+            'tertiary_subject': lambda course: course.subjects.all()[2].name if course.subjects.all()[2] else None,
+            
+        }
+        for row in self.reader:
+            row = self.transform_dict_keys(row)
+            missing_fields = self.validate_course_data(self.get_course_type(row["course_enrollment_track"]), row)
+            if missing_fields:
+                missing_fields_list = missing_fields.split(', ')
+                logger.warning(f"Missing required fields: {missing_fields_list}")
+                # add missing fields to the row
+                course_key = self.get_course_key(row.get('organization'), row.get('number'))
+                course = Course.objects.filter_drafts(key=course_key, partner=self.partner).only(
+                    # comma separated string of missing fields
+                    *missing_fields_list
+                ).first()
+
+                for missing_field in missing_fields_list:
+                    if missing_field in field_mapping:
+                        row[missing_field] = field_mapping[missing_field](course)
+                    else:
+                        row[missing_field] = course.__dict__.get(missing_field, None)
+
 
     def ingest(self):  # pylint: disable=too-many-statements
         logger.info("Initiating CSV data loader flow.")
@@ -517,7 +555,7 @@ class CSVDataLoader(AbstractDataLoader):
             course_run = CourseRun.objects.filter_drafts(course=course).order_by('created').last()
         return course_run, is_course_run_created
 
-    def validate_course_data(self, course_type, data):
+    def validate_course_data(self, course_type, data, use_csv_names=False):
         """
         Verify the required data key-values for a course type are present in the provided
         data dictionary and return a comma separated string of missing data fields.
@@ -539,7 +577,10 @@ class CSVDataLoader(AbstractDataLoader):
 
         for field in required_fields:
             if not (field in data and data[field]):
-                missing_fields.append(settings.GEAG_API_INGESTION_FIELDS_MAPPING.get(field) or field)
+                if use_csv_names:
+                    missing_fields.append(field)
+                else:
+                    missing_fields.append(settings.GEAG_API_INGESTION_FIELDS_MAPPING.get(field) or field)
 
         if missing_fields:
             return ', '.join(missing_fields)
@@ -646,7 +687,7 @@ class CSVDataLoader(AbstractDataLoader):
         Given a data dictionary, return a reduced data representation in dict
         which will be used as input for course run creation via course run api.
         """
-        pricing = self.get_pricing_representation(data['verified_price'], course_type)
+        pricing = self.get_pricing_representation(data.get('verified_price'), course_type)
         course_run_creation_fields = {
             'pacing_type': self.get_pacing_type(data['course_pacing']),
             'start': self.get_formatted_datetime_string(f"{data['start_date']} {data['start_time']}"),
